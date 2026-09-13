@@ -28,7 +28,7 @@ A single Bash script that turns a fresh **Apple Silicon Mac** into an unattended
 - **Sleep & Power Assertions** — disables system sleep, display sleep, and standby permanently while keeping network keep-alives active.
 - **Metal / Unified Memory Tuning** — raises `iogpu.wired_mem_limit` to 90%, so macOS doesn't artificially cap GPU memory for large local models.
 - **File Descriptor Expansion** — installs a `launchd` daemon raising open-file limits (`maxfiles`) to `524288`.
-- **Headless GUI Optimization** — clears the Dock, disables UI animations, and suppresses error dialogs to save RAM and GPU cycles.
+- **Headless GUI Optimization** — clears the Dock (pinning just Terminal back in), sets a solid black wallpaper, hides desktop icons/widgets, disables UI animations, and suppresses error dialogs to save RAM and GPU cycles.
 - **Remote Access Out-of-the-Box** — enables SSH (`Remote Login`) with keep-alive tuning, plus native Screen Sharing (VNC).
 - **Bloatware Stripping** — removes `Keynote`, `Numbers`, `Pages`, `GarageBand`, and `iMovie` from `/Applications`.
 - **System Stability** — disables automatic OS updates/reboots and Spotlight indexing, to avoid surprise interruptions and unnecessary disk writes.
@@ -97,16 +97,18 @@ Stops GUI confirmation prompts from blocking headless background services that b
 </details>
 
 <details>
-<summary><strong>Dock & UI</strong> — <code>com.apple.dock</code>, <code>NSGlobalDomain</code></summary>
+<summary><strong>Dock & UI</strong> — <code>com.apple.dock</code>, <code>NSGlobalDomain</code>, <code>com.apple.finder</code></summary>
 
 | Key | Value |
 | :--- | :--- |
-| `persistent-apps` | cleared |
+| `persistent-apps` | cleared, then re-pinned with just `Terminal.app` |
 | `show-recents` | `false` |
 | `launchanim`, window/animation settings | `false` / `0` |
 | `com.apple.CrashReporter DialogType` | `none` |
+| Desktop picture | solid black (`/Library/Desktop Pictures/headless-black.png`) |
+| `com.apple.finder CreateDesktop` | `false` (hides desktop icons and, best-effort, the 3 default widgets: Weather, Calendar, Photos) |
 
-Purges pinned Dock icons, turns off animations, and suppresses crash dialogs — mostly cosmetic, but it reduces rendering overhead over Screen Sharing.
+Purges pinned Dock icons (leaving just Terminal for one-click shell access over Screen Sharing), turns off animations, suppresses crash dialogs, sets a plain black wallpaper, and hides the desktop icon/widget layer entirely — mostly cosmetic, but it reduces rendering overhead over Screen Sharing. Two caveats: setting the wallpaper goes through System Events and can require a one-time "Automation" permission grant for Terminal (same category of manual TCC gate as Full Disk Access for SSH — see [Prerequisites](#prerequisites)); and hiding the desktop widgets specifically hasn't been confirmed on real hardware — if one survives a reboot, right-click it and choose "Remove Widget" as a manual fallback.
 </details>
 
 <details>
@@ -205,6 +207,8 @@ This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It d
    # Disable if enabled
    sudo fdesetup disable
    ```
+
+> **Optional:** setting the black wallpaper goes through System Events and can similarly prompt for a one-time "Automation" permission (`System Settings → Privacy & Security → Automation → Terminal → System Events`). It's not required for anything else in the script — if you skip it, that one step just reports as failed and everything else still completes normally.
 
 ---
 

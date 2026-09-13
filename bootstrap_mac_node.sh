@@ -379,6 +379,26 @@ remove_unneeded_apps() {
 clean_dock_and_ui() {
     local ok=0
     su - "$TARGET_USER" -c 'defaults write com.apple.dock persistent-apps -array' || ok=1
+
+    # Pin Terminal.app back into the now-empty Dock -- useful for headless
+    # boxes accessed over Screen Sharing, where you still want one-click
+    # access to a shell. Rebuilt from scratch every run (clear, then add),
+    # so this is idempotent by construction rather than needing its own
+    # "already pinned?" check.
+    local candidate term_path=""
+    for candidate in "/System/Applications/Utilities/Terminal.app" "/Applications/Utilities/Terminal.app"; do
+        if [[ -d "$candidate" ]]; then
+            term_path="$candidate"
+            break
+        fi
+    done
+    if [[ -n "$term_path" ]]; then
+        local dock_entry="<dict><key>tile-data</key><dict><key>file-data</key><dict><key>_CFURLString</key><string>${term_path}</string><key>_CFURLStringType</key><integer>0</integer></dict></dict></dict>"
+        su - "$TARGET_USER" -c "defaults write com.apple.dock persistent-apps -array-add '${dock_entry}'" || ok=1
+    else
+        echo -e "${CLR_YEL}Warning: could not find Terminal.app in the usual locations. Skipping Dock pin.${CLR_RST}"
+    fi
+
     su - "$TARGET_USER" -c 'defaults write com.apple.dock show-recents -bool false' || ok=1
     su - "$TARGET_USER" -c 'defaults write com.apple.dock launchanim -bool false' || ok=1
     su - "$TARGET_USER" -c 'defaults write NSGlobalDomain NSAutomaticWindowAnimationsEnabled -bool false' || ok=1
@@ -386,6 +406,50 @@ clean_dock_and_ui() {
     su - "$TARGET_USER" -c 'defaults write NSGlobalDomain NSWindowResizeTime -float 0.001' || ok=1
     su - "$TARGET_USER" -c 'defaults write com.apple.CrashReporter DialogType none' || ok=1
     su - "$TARGET_USER" -c 'killall Dock 2>/dev/null || true'
+    return "$ok"
+}
+
+set_black_wallpaper() {
+    local wallpaper_dir="/Library/Desktop Pictures"
+    local wallpaper_path="${wallpaper_dir}/headless-black.png"
+
+    if [[ ! -f "$wallpaper_path" ]]; then
+        mkdir -p "$wallpaper_dir" || return 1
+        # A minimal, valid 1x1 solid-black PNG (macOS scales it to fill the
+        # screen) -- avoids depending on any image tool being installed yet.
+        printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\x60\x60\x60\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB\x60\x82' > "$wallpaper_path" || return 1
+        chmod 644 "$wallpaper_path"
+    fi
+
+    # Setting the desktop picture goes through System Events (there's no
+    # 'defaults write' for this on modern macOS), which can require a
+    # one-time "Automation" permission grant for the app running this
+    # script -- the same category of manual, GUI-only TCC gate as Full Disk
+    # Access for SSH, just for a purely cosmetic setting. Report failure
+    # honestly rather than assume it worked.
+    local ok=0
+    su - "$TARGET_USER" -c "osascript -e 'tell application \"System Events\" to tell every desktop to set picture to \"${wallpaper_path}\"'" || ok=1
+    if [[ "$ok" -eq 1 ]]; then
+        echo -e "${CLR_YEL}Could not set the desktop wallpaper via System Events -- this can require a one-time 'Automation' permission grant (System Settings -> Privacy & Security -> Automation -> allow Terminal to control 'System Events'), similar to Full Disk Access for SSH. Purely cosmetic and non-blocking -- re-run after granting it if you want the wallpaper applied.${CLR_RST}"
+    else
+        echo "Desktop wallpaper set to solid black ($wallpaper_path)."
+    fi
+    return "$ok"
+}
+
+hide_desktop_icons_and_widgets() {
+    local ok=0
+    local current
+    current=$(su - "$TARGET_USER" -c 'defaults read com.apple.finder CreateDesktop' 2>/dev/null || echo "")
+    if [[ "$current" == "0" ]]; then
+        echo "Desktop icons/widgets already hidden (CreateDesktop=false). Skipping."
+        return 0
+    fi
+
+    su - "$TARGET_USER" -c 'defaults write com.apple.finder CreateDesktop -bool false' || ok=1
+    su - "$TARGET_USER" -c 'killall Finder 2>/dev/null || true'
+
+    echo -e "${CLR_YEL}Note: this hides the entire desktop icon/widget layer via Finder's CreateDesktop preference -- a long-established toggle for desktop icons, which should also catch the 3 default macOS desktop widgets (Weather, Calendar, Photos), since Sonoma+ places widgets in the same on-desktop arrangement as icons. Not confirmed on real hardware yet, though; if any widget is still visible after a reboot, right-click it and choose 'Remove Widget' as a manual fallback.${CLR_RST}"
     return "$ok"
 }
 
@@ -565,6 +629,8 @@ run_step "Configure SSH KeepAlive" tune_ssh_keepalive
 run_step "Disable Application Firewall" disable_firewall
 run_step "Remove Unneeded Native Apps (/Applications)" remove_unneeded_apps
 run_step "Clean Dock and Optimize UI" clean_dock_and_ui
+run_step "Set Solid Black Wallpaper" set_black_wallpaper
+run_step "Hide Desktop Icons and Widgets" hide_desktop_icons_and_widgets
 run_step "Disable Siri and Diagnostic Telemetry" disable_telemetry_and_siri
 run_step "Configure Software Update to Manual Mode" set_manual_updates
 run_step "Disable Spotlight Indexing" disable_spotlight
