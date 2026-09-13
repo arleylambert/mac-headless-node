@@ -17,6 +17,12 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
     exit 1
 fi
 
+if [[ "$(uname -m)" != "arm64" ]]; then
+    echo -e "${CLR_RED}Error: This script targets Apple Silicon (arm64) Macs only. Detected: $(uname -m).${CLR_RST}"
+    echo -e "${CLR_RED}Intel Macs lack the Unified Memory / iogpu tuning this script relies on.${CLR_RST}"
+    exit 1
+fi
+
 if [[ $EUID -ne 0 ]]; then
     echo -e "${CLR_RED}Error: This script must be run as root (sudo).${CLR_RST}"
     exit 1
@@ -56,6 +62,8 @@ chmod 644 "$LOG_FILE"
 
 # Redirect stdout and stderr simultaneously to terminal and log file
 exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo -e "${CLR_CYN}Host: $(sysctl -n hw.model 2>/dev/null || echo unknown) | macOS $(sw_vers -productVersion 2>/dev/null || echo unknown) (build $(sw_vers -buildVersion 2>/dev/null || echo unknown)) | $(uname -m)${CLR_RST}"
 
 declare -a SUCCESS_STEPS=()
 declare -a FAILED_STEPS=()
@@ -112,7 +120,7 @@ set_high_power_mode() {
     local chip_model
     chip_model=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "")
     if [[ "$chip_model" != *"Pro"* && "$chip_model" != *"Max"* && "$chip_model" != *"Ultra"* ]]; then
-        echo "Base M4 chip detected ($chip_model). Standard thermal profile retained."
+        echo "Base-tier Apple Silicon chip detected ($chip_model). Standard thermal profile retained."
         return 0
     fi
 
@@ -258,7 +266,7 @@ set_maxfiles_limit() {
 EOF
     chown root:wheel "$plist_path" || return 1
     chmod 644 "$plist_path" || return 1
-    launchctl load -w "$plist_path" 2>/dev/null || true
+    launchctl bootstrap system "$plist_path" 2>/dev/null || launchctl load -w "$plist_path" 2>/dev/null || true
     return 0
 }
 

@@ -13,6 +13,7 @@ A single Bash script that turns a fresh **Mac mini M4 / M4 Pro** into an unatten
 - [Key Features](#key-features)
 - [What the Script Changes](#what-the-script-changes)
 - [Risk Analysis & Trade-offs](#risk-analysis--trade-offs)
+- [Tested Hardware & Compatibility](#tested-hardware--compatibility)
 - [Prerequisites](#prerequisites)
 - [Installation & Usage](#installation--usage)
 - [Post-Execution Checklist](#post-execution-checklist)
@@ -159,6 +160,24 @@ Automatic OS updates and reboots are disabled. **Impact:** Apple's security patc
 
 ### 6. Kernel Panic Potential under Memory Starvation
 `iogpu.wired_mem_limit` is raised to 90%, letting a single inference process claim nearly all Unified Memory. **Impact:** if an LLM runtime hits that ceiling while the system is also under memory pressure (with no swap headroom), macOS can panic instead of gracefully killing the offending process. **Mitigation:** size context windows and quantization (`Q4_K_M`, `Q8_0`, etc.) to comfortably fit available RAM.
+
+---
+
+## Tested Hardware & Compatibility
+
+This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It doesn't call anything M4-specific, though — every command it uses (`scutil`, `pmset`, `launchctl`, `socketfilterfw`, `defaults`, and the `iogpu.wired_mem_limit` unified-memory tuning) is standard across Apple Silicon, and the "High Power Mode" step already tries several pmset keys and skips itself cleanly if none apply. Since M1, the script requires **Apple Silicon (arm64)** — it now checks for this explicitly and exits with a clear error on Intel Macs, which don't have Unified Memory or the `iogpu` tuning this project relies on.
+
+| Model | Status | Notes |
+| :--- | :--- | :--- |
+| **Mac mini** (M4 / M4 Pro) | ✅ Tested | Primary target of this project |
+| **Mac mini** (M1 / M2 / M2 Pro) | 🟡 Expected to work | Same headless use case, untested |
+| **Mac Studio** (M1/M2 Max/Ultra, M3 Ultra, and later) | 🟡 Expected to work | Arguably an even better fit — more sustained thermal headroom for larger models |
+| **Mac Pro** (Apple Silicon, M2 Ultra and later) | 🟡 Expected to work | Same reasoning as Mac Studio |
+| **iMac** (M1, M3, M4) | 🟡 Expected to work | Compatible, but running a display-equipped all-in-one headless is an unusual choice |
+| **MacBook Air / MacBook Pro** (M1–M4 family) | 🟡 Expected to work, with caveats | Needs external power and clamshell (lid-closed) mode configured so the built-in display sleeping doesn't put the whole system to sleep; battery wear from 24/7 operation is also a consideration |
+| **Any Intel Mac** | ❌ Not supported | The script now exits immediately — no Unified Memory / `iogpu` tuning available on Intel |
+
+"🟡 Expected to work" means: no code path in the script is hardware-gated to the M4 specifically, so there's no known reason it wouldn't run — but it hasn't been run there yet. If you test it on one of these and it works (or doesn't), opening an issue or a PR to update this table is very welcome.
 
 ---
 
