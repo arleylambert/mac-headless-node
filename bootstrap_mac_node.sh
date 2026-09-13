@@ -187,6 +187,7 @@ echo -e "${CLR_CYN}Host: $(sysctl -n hw.model 2>/dev/null || echo unknown) | mac
 
 declare -a SUCCESS_STEPS=()
 declare -a FAILED_STEPS=()
+FDA_SSH_ISSUE=0
 
 run_step() {
     local step_name="$1"
@@ -286,6 +287,7 @@ enable_remote_access() {
             ok=1
             echo "$remotelogin_output"
             if [[ "$remotelogin_output" == *"Full Disk Access"* ]]; then
+                FDA_SSH_ISSUE=1
                 echo -e "${CLR_YEL}Hint: macOS requires the app running this script (usually Terminal) to have Full Disk Access before 'systemsetup' can toggle Remote Login. This is a one-time GUI-only step Apple doesn't allow scripting around:${CLR_RST}"
                 echo -e "${CLR_YEL}  System Settings -> Privacy & Security -> Full Disk Access -> enable it for Terminal (or whichever app is running this script) -> re-run this script.${CLR_RST}"
             fi
@@ -377,6 +379,26 @@ remove_unneeded_apps() {
 clean_dock_and_ui() {
     local ok=0
     su - "$TARGET_USER" -c 'defaults write com.apple.dock persistent-apps -array' || ok=1
+
+    # Pin Terminal.app back into the now-empty Dock -- useful for headless
+    # boxes accessed over Screen Sharing, where you still want one-click
+    # access to a shell. Rebuilt from scratch every run (clear, then add),
+    # so this is idempotent by construction rather than needing its own
+    # "already pinned?" check.
+    local candidate term_path=""
+    for candidate in "/System/Applications/Utilities/Terminal.app" "/Applications/Utilities/Terminal.app"; do
+        if [[ -d "$candidate" ]]; then
+            term_path="$candidate"
+            break
+        fi
+    done
+    if [[ -n "$term_path" ]]; then
+        local dock_entry="<dict><key>tile-data</key><dict><key>file-data</key><dict><key>_CFURLString</key><string>${term_path}</string><key>_CFURLStringType</key><integer>0</integer></dict></dict></dict>"
+        su - "$TARGET_USER" -c "defaults write com.apple.dock persistent-apps -array-add '${dock_entry}'" || ok=1
+    else
+        echo -e "${CLR_YEL}Warning: could not find Terminal.app in the usual locations. Skipping Dock pin.${CLR_RST}"
+    fi
+
     su - "$TARGET_USER" -c 'defaults write com.apple.dock show-recents -bool false' || ok=1
     su - "$TARGET_USER" -c 'defaults write com.apple.dock launchanim -bool false' || ok=1
     su - "$TARGET_USER" -c 'defaults write NSGlobalDomain NSAutomaticWindowAnimationsEnabled -bool false' || ok=1
@@ -384,6 +406,50 @@ clean_dock_and_ui() {
     su - "$TARGET_USER" -c 'defaults write NSGlobalDomain NSWindowResizeTime -float 0.001' || ok=1
     su - "$TARGET_USER" -c 'defaults write com.apple.CrashReporter DialogType none' || ok=1
     su - "$TARGET_USER" -c 'killall Dock 2>/dev/null || true'
+    return "$ok"
+}
+
+set_black_wallpaper() {
+    local wallpaper_dir="/Library/Desktop Pictures"
+    local wallpaper_path="${wallpaper_dir}/headless-black.png"
+
+    if [[ ! -f "$wallpaper_path" ]]; then
+        mkdir -p "$wallpaper_dir" || return 1
+        # A minimal, valid 1x1 solid-black PNG (macOS scales it to fill the
+        # screen) -- avoids depending on any image tool being installed yet.
+        printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\x60\x60\x60\x00\x00\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB\x60\x82' > "$wallpaper_path" || return 1
+        chmod 644 "$wallpaper_path"
+    fi
+
+    # Setting the desktop picture goes through System Events (there's no
+    # 'defaults write' for this on modern macOS), which can require a
+    # one-time "Automation" permission grant for the app running this
+    # script -- the same category of manual, GUI-only TCC gate as Full Disk
+    # Access for SSH, just for a purely cosmetic setting. Report failure
+    # honestly rather than assume it worked.
+    local ok=0
+    su - "$TARGET_USER" -c "osascript -e 'tell application \"System Events\" to tell every desktop to set picture to \"${wallpaper_path}\"'" || ok=1
+    if [[ "$ok" -eq 1 ]]; then
+        echo -e "${CLR_YEL}Could not set the desktop wallpaper via System Events -- this can require a one-time 'Automation' permission grant (System Settings -> Privacy & Security -> Automation -> allow Terminal to control 'System Events'), similar to Full Disk Access for SSH. Purely cosmetic and non-blocking -- re-run after granting it if you want the wallpaper applied.${CLR_RST}"
+    else
+        echo "Desktop wallpaper set to solid black ($wallpaper_path)."
+    fi
+    return "$ok"
+}
+
+hide_desktop_icons_and_widgets() {
+    local ok=0
+    local current
+    current=$(su - "$TARGET_USER" -c 'defaults read com.apple.finder CreateDesktop' 2>/dev/null || echo "")
+    if [[ "$current" == "0" ]]; then
+        echo "Desktop icons/widgets already hidden (CreateDesktop=false). Skipping."
+        return 0
+    fi
+
+    su - "$TARGET_USER" -c 'defaults write com.apple.finder CreateDesktop -bool false' || ok=1
+    su - "$TARGET_USER" -c 'killall Finder 2>/dev/null || true'
+
+    echo -e "${CLR_YEL}Note: this hides the entire desktop icon/widget layer via Finder's CreateDesktop preference -- a long-established toggle for desktop icons, which should also catch the 3 default macOS desktop widgets (Weather, Calendar, Photos), since Sonoma+ places widgets in the same on-desktop arrangement as icons. Not confirmed on real hardware yet, though; if any widget is still visible after a reboot, right-click it and choose 'Remove Widget' as a manual fallback.${CLR_RST}"
     return "$ok"
 }
 
@@ -563,6 +629,8 @@ run_step "Configure SSH KeepAlive" tune_ssh_keepalive
 run_step "Disable Application Firewall" disable_firewall
 run_step "Remove Unneeded Native Apps (/Applications)" remove_unneeded_apps
 run_step "Clean Dock and Optimize UI" clean_dock_and_ui
+run_step "Set Solid Black Wallpaper" set_black_wallpaper
+run_step "Hide Desktop Icons and Widgets" hide_desktop_icons_and_widgets
 run_step "Disable Siri and Diagnostic Telemetry" disable_telemetry_and_siri
 run_step "Configure Software Update to Manual Mode" set_manual_updates
 run_step "Disable Spotlight Indexing" disable_spotlight
@@ -590,6 +658,33 @@ if [[ ${#FAILED_STEPS[@]} -gt 0 ]]; then
     done
 else
     echo -e "${CLR_GRN}No failures reported.${CLR_RST}"
+fi
+
+if [[ "$FDA_SSH_ISSUE" == "1" ]]; then
+    echo -e "\n${CLR_RED}=================================================="
+    echo -e "  ACTION REQUIRED: FULL DISK ACCESS FOR SSH / SCREEN SHARING  "
+    echo -e "==================================================${CLR_RST}"
+    echo -e "${CLR_YEL}Remote Login (SSH) could not be turned on. macOS requires Full Disk Access"
+    echo -e "for whichever app is running this script (usually Terminal) before"
+    echo -e "'systemsetup' is allowed to toggle it -- a one-time, GUI-only step Apple"
+    echo -e "doesn't allow scripting around.${CLR_RST}"
+    echo -e ""
+    echo -e "${CLR_CYN}To fix it:${CLR_RST}"
+    echo -e "  1. Open System Settings -> Privacy & Security -> Full Disk Access"
+    echo -e "  2. Enable the toggle for Terminal (or whichever app is running this script)"
+    echo -e "  3. Re-run this script: ${CLR_YEL}sudo $0${CLR_RST}"
+    echo -e "     (TARGET_USER/NODE_HOSTNAME are already saved -- no need to pass them again)"
+    echo -e ""
+    echo -e "${CLR_RED}Security consideration:${CLR_RST} Full Disk Access is a broad grant, not a"
+    echo -e "narrow one for this one setting. Once enabled for an app, anything that runs"
+    echo -e "inside it (including this script, or any other command you run there later)"
+    echo -e "can read virtually every file on this Mac -- Mail, Photos, Messages, Time"
+    echo -e "Machine backups, other users' home directories -- bypassing the per-app"
+    echo -e "privacy prompts macOS normally shows. It's only actually needed for this one"
+    echo -e "'systemsetup -setremotelogin' call; SSH keeps working fine afterward without"
+    echo -e "it. Once this step succeeds, you can safely revoke Full Disk Access from that"
+    echo -e "app again (same System Settings screen) if you'd rather not leave it granted"
+    echo -e "long-term."
 fi
 
 echo -e "\n--------------------------------------------------"
