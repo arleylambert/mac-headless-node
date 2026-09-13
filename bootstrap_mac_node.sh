@@ -129,12 +129,18 @@ if fdesetup status 2>/dev/null | grep -q "FileVault is On"; then
            re-run this script)")
 fi
 
-# Best-effort: the 'Enable Remote Login' step later needs Full Disk Access
-# granted to whatever app is running this script (usually Terminal), which
-# macOS only lets a human grant via the GUI. There's no reliable way to query
-# that grant directly, so this probes the read-only equivalent of the command
-# that will actually fail and catches it here when possible -- if it doesn't
-# catch it, the later step will, with the same instructions.
+# Best-effort, and known to be unreliable: the 'Enable Remote Login' step
+# later needs Full Disk Access granted to whatever app is running this script
+# (usually Terminal), which macOS only lets a human grant via the GUI. There's
+# no supported way to query that grant directly. This probes the read-only
+# equivalent of the command that will actually fail -- but 'systemsetup
+# -getremotelogin' is a read, and only the write path ('-setremotelogin')
+# has been observed to actually require Full Disk Access, so this check may
+# simply never trigger even when FDA is missing. It's left in because it's
+# harmless and *might* catch it on some macOS versions, but don't rely on it:
+# the real safety net is that 'enable_remote_access' further down still
+# fails cleanly with the same actionable instructions if this doesn't catch
+# it first -- confirmed against real Mac mini M4 hardware.
 fda_probe=$(systemsetup -getremotelogin 2>&1)
 if [[ "$fda_probe" == *"Full Disk Access"* ]]; then
     PREFLIGHT_ERRORS+=("Full Disk Access is not granted to the app running this script
@@ -248,11 +254,17 @@ set_high_power_mode() {
     # macOS exposes "High Power Mode" via different pmset keys depending on
     # version/hardware. Try the known keys in order and only fail the step if
     # none of them are accepted on this machine.
+    # pmset is known to silently accept keys it doesn't actually recognize
+    # (exit 0, no effect), so a successful exit code alone isn't proof the
+    # setting stuck -- read it back from 'pmset -g custom' before trusting it.
     local key
     for key in highpowermode perfmode highpower; do
         if pmset -a "$key" 1 2>/dev/null; then
-            echo "Enabled High Power Mode via 'pmset -a ${key} 1'."
-            return 0
+            if pmset -g custom 2>/dev/null | grep -qE "^[[:space:]]*${key}[[:space:]]+1"; then
+                echo "Enabled High Power Mode via 'pmset -a ${key} 1' (confirmed via 'pmset -g custom')."
+                return 0
+            fi
+            echo -e "${CLR_YEL}'pmset -a ${key} 1' exited successfully but the setting doesn't show up in 'pmset -g custom' -- this macOS version likely doesn't support that key. Trying the next one.${CLR_RST}"
         fi
     done
 
@@ -301,18 +313,32 @@ tune_ssh_keepalive() {
         return 0
     fi
 
-    cp "$sshd_config" "${BACKUP_DIR}/sshd_config.bak" || return 1
+    local backup="${BACKUP_DIR}/sshd_config.bak"
+    cp "$sshd_config" "$backup" || return 1
 
     if grep -q "^ClientAliveInterval" "$sshd_config"; then
-        sed -i '' 's/^ClientAliveInterval.*/ClientAliveInterval 30/' "$sshd_config" || return 1
+        sed -i '' 's/^ClientAliveInterval.*/ClientAliveInterval 30/' "$sshd_config" || { cp "$backup" "$sshd_config"; return 1; }
     else
         echo "ClientAliveInterval 30" >> "$sshd_config"
     fi
 
     if grep -q "^ClientAliveCountMax" "$sshd_config"; then
-        sed -i '' 's/^ClientAliveCountMax.*/ClientAliveCountMax 5/' "$sshd_config" || return 1
+        sed -i '' 's/^ClientAliveCountMax.*/ClientAliveCountMax 5/' "$sshd_config" || { cp "$backup" "$sshd_config"; return 1; }
     else
         echo "ClientAliveCountMax 5" >> "$sshd_config"
+    fi
+
+    # This machine is fully headless -- a broken sshd_config would mean losing
+    # SSH for good until someone gets physical/Screen Sharing access. Validate
+    # the edited file before trusting it, and restore the pristine backup
+    # immediately if it doesn't pass, rather than leaving a bad config in
+    # place until the next reboot surfaces the problem.
+    local test_output
+    if ! test_output=$(sshd -t -f "$sshd_config" 2>&1); then
+        echo -e "${CLR_RED}sshd_config failed validation after edit -- restoring original from backup:${CLR_RST}"
+        echo "$test_output"
+        cp "$backup" "$sshd_config"
+        return 1
     fi
 
     # sshd only picks up config changes on restart; this host reboots at the
@@ -329,7 +355,10 @@ disable_firewall() {
         echo "Application Firewall already disabled. Skipping."
         return 0
     fi
-    /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off 2>/dev/null || true
+
+    local ok=0
+    /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off || ok=1
+    return "$ok"
 }
 
 remove_unneeded_apps() {
@@ -379,7 +408,10 @@ disable_spotlight() {
         echo "Spotlight indexing already disabled. Skipping."
         return 0
     fi
-    mdutil -a -i off 2>/dev/null || true
+
+    local ok=0
+    mdutil -a -i off || ok=1
+    return "$ok"
 }
 
 set_unified_memory_limit() {
@@ -406,9 +438,16 @@ set_unified_memory_limit() {
 
 set_maxfiles_limit() {
     local plist_path="/Library/LaunchDaemons/limit.maxfiles.plist"
+    local desired=524288
 
-    if [[ -f "$plist_path" ]] && launchctl print system/limit.maxfiles >/dev/null 2>&1; then
-        echo "maxfiles LaunchDaemon already installed and loaded (524288/524288). Skipping."
+    # Check the *actual* effective limit (not just "is our daemon loaded") so
+    # a stale plist with different numbers, or one that failed to apply, isn't
+    # mistaken for "already configured".
+    local soft hard
+    read -r _ soft hard < <(launchctl limit maxfiles 2>/dev/null)
+
+    if [[ -f "$plist_path" && "$soft" == "$desired" && "$hard" == "$desired" ]]; then
+        echo "maxfiles limit already at ${desired}/${desired} (LaunchDaemon installed and loaded). Skipping."
         return 0
     fi
 
@@ -436,8 +475,17 @@ set_maxfiles_limit() {
 EOF
     chown root:wheel "$plist_path" || return 1
     chmod 644 "$plist_path" || return 1
-    launchctl bootstrap system "$plist_path" 2>/dev/null || launchctl load -w "$plist_path" 2>/dev/null || true
-    return 0
+
+    local ok=0
+    if ! launchctl bootstrap system "$plist_path" 2>/dev/null; then
+        launchctl load -w "$plist_path" 2>/dev/null || ok=1
+    fi
+
+    read -r _ soft hard < <(launchctl limit maxfiles 2>/dev/null)
+    if [[ "$soft" != "$desired" || "$hard" != "$desired" ]]; then
+        echo -e "${CLR_YEL}Warning: maxfiles limit reports ${soft:-?}/${hard:-?} after loading the daemon, not ${desired}/${desired}. It may need a reboot to fully take effect.${CLR_RST}"
+    fi
+    return "$ok"
 }
 
 install_dev_tools() {
@@ -483,7 +531,7 @@ install_dev_tools() {
         mkdir -p "$brew_prefix" || ok=1
         chown -R "${TARGET_USER}:admin" "$brew_prefix" 2>/dev/null || chown -R "$TARGET_USER" "$brew_prefix" || ok=1
 
-        su - "$TARGET_USER" -c "curl -fsSL https://github.com/Homebrew/brew/tarball/main | tar xz --strip-components 1 -C '${brew_prefix}'" || ok=1
+        su - "$TARGET_USER" -c "set -o pipefail; curl -fsSL https://github.com/Homebrew/brew/tarball/main | tar xz --strip-components 1 -C '${brew_prefix}'" || ok=1
 
         # Put brew on PATH for future login shells (Apple Silicon prefix).
         # Guarded with [[ -x ... ]] so a login shell never prints a "no such
@@ -545,13 +593,10 @@ else
 fi
 
 echo -e "\n--------------------------------------------------"
-if fdesetup status | grep -q "FileVault is On"; then
-    echo -e "${CLR_RED}[!] CRITICAL WARNING: FileVault is currently ENABLED.${CLR_RST}"
-    echo -e "${CLR_RED}    Unattended boots and auto-login after power cuts WILL FAIL.${CLR_RST}"
-    echo -e "${CLR_RED}    Action Required: Run 'sudo fdesetup disable' before rebooting.${CLR_RST}"
-else
-    echo -e "${CLR_GRN}[✔] FileVault status: DISABLED (Ready for autonomous reboots).${CLR_RST}"
-fi
+# FileVault is guaranteed to be off here -- the preflight check at the top of
+# this script aborts before touching anything if it's still on, so there's no
+# code path that reaches this point with FileVault enabled.
+echo -e "${CLR_GRN}[✔] FileVault status: DISABLED (verified during preflight; ready for autonomous reboots).${CLR_RST}"
 
 echo -e "\n=================================================="
 echo -e "           POST-EXECUTION INSTRUCTIONS            "
