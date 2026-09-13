@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-TARGET_USER="${1:-}"
-NODE_HOSTNAME="${2:-}"
+TARGET_USER_ARG="${1:-}"
+NODE_HOSTNAME_ARG="${2:-}"
 
 # ANSI Color Codes
 CLR_RED="\033[1;31m"
@@ -28,6 +28,63 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+# --- Resolve TARGET_USER / NODE_HOSTNAME: argument > saved value from a
+# previous successful run > empty. A value passed on the command line always
+# wins and becomes the new saved value once preflight checks pass below.
+STATE_FILE="/etc/mac-headless-node.env"
+SAVED_TARGET_USER=""
+SAVED_NODE_HOSTNAME=""
+if [[ -f "$STATE_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$STATE_FILE"
+fi
+
+TARGET_USER_SOURCE=""
+if [[ -n "$TARGET_USER_ARG" ]]; then
+    TARGET_USER="$TARGET_USER_ARG"
+    TARGET_USER_SOURCE="argument"
+elif [[ -n "$SAVED_TARGET_USER" ]]; then
+    TARGET_USER="$SAVED_TARGET_USER"
+    TARGET_USER_SOURCE="saved"
+else
+    TARGET_USER=""
+fi
+
+NODE_HOSTNAME_SOURCE=""
+if [[ -n "$NODE_HOSTNAME_ARG" ]]; then
+    NODE_HOSTNAME="$NODE_HOSTNAME_ARG"
+    NODE_HOSTNAME_SOURCE="argument"
+elif [[ -n "$SAVED_NODE_HOSTNAME" ]]; then
+    NODE_HOSTNAME="$SAVED_NODE_HOSTNAME"
+    NODE_HOSTNAME_SOURCE="saved"
+else
+    NODE_HOSTNAME=""
+fi
+
+# --- Local Log File and Backup Directory Configuration ---
+# Set up logging now (before preflight checks run) so the preflight output
+# and the "using saved value" notes below all end up in the log too.
+# Ownership of these paths is fixed to TARGET_USER once preflight confirms
+# it's a real user.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TIMESTAMP="$(date '+%Y%m%d_%H%M%S')"
+LOG_FILE="${SCRIPT_DIR}/bootstrap_${TIMESTAMP}.log"
+BACKUP_DIR="${SCRIPT_DIR}/backups_${TIMESTAMP}"
+
+mkdir -p "$BACKUP_DIR"
+touch "$LOG_FILE"
+chmod 644 "$LOG_FILE"
+
+# Redirect stdout and stderr simultaneously to terminal and log file
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+if [[ "$TARGET_USER_SOURCE" == "saved" ]]; then
+    echo -e "${CLR_CYN}Using saved target user '${TARGET_USER}' from a previous run (${STATE_FILE}). Pass a username explicitly to use a different one.${CLR_RST}"
+fi
+if [[ "$NODE_HOSTNAME_SOURCE" == "saved" ]]; then
+    echo -e "${CLR_CYN}Using saved hostname '${NODE_HOSTNAME}' from a previous run (${STATE_FILE}). Pass a hostname explicitly to use a different one.${CLR_RST}"
+fi
+
 # --- Preflight Checks ---
 #
 # Everything below is checked *before* the script touches the system at all.
@@ -38,12 +95,20 @@ fi
 declare -a PREFLIGHT_ERRORS=()
 
 if [[ -z "$TARGET_USER" ]]; then
-    PREFLIGHT_ERRORS+=("Target username required as the first argument.
-      Usage: sudo bash $0 <username> [node_hostname]")
+    PREFLIGHT_ERRORS+=("Target username required as the first argument (no saved value found from a previous run).
+      Usage: sudo bash $0 <username> [node_hostname]
+      Once this succeeds with a username, future runs can omit it entirely
+      -- it's remembered in ${STATE_FILE}.")
 elif ! id "$TARGET_USER" >/dev/null 2>&1; then
-    PREFLIGHT_ERRORS+=("Target user '$TARGET_USER' does not exist on this system.
-      Create it first (System Settings -> Users & Groups -> Add Account),
-      or pass the correct existing username as the first argument.")
+    if [[ "$TARGET_USER_SOURCE" == "saved" ]]; then
+        PREFLIGHT_ERRORS+=("Target user '$TARGET_USER' (saved from a previous run in ${STATE_FILE}) no longer exists on this system.
+          Pass a different, existing username explicitly as the first argument,
+          or delete ${STATE_FILE} to clear the saved value.")
+    else
+        PREFLIGHT_ERRORS+=("Target user '$TARGET_USER' does not exist on this system.
+          Create it first (System Settings -> Users & Groups -> Add Account),
+          or pass the correct existing username as the first argument.")
+    fi
 fi
 
 # Optional hostname must be a valid RFC-1123 label if provided (letters, digits,
@@ -97,21 +162,20 @@ fi
 
 echo -e "${CLR_GRN}Preflight checks passed.${CLR_RST}"
 
-# Local Log File and Backup Directory Configuration
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TIMESTAMP="$(date '+%Y%m%d_%H%M%S')"
-LOG_FILE="${SCRIPT_DIR}/bootstrap_${TIMESTAMP}.log"
-BACKUP_DIR="${SCRIPT_DIR}/backups_${TIMESTAMP}"
-
-mkdir -p "$BACKUP_DIR"
+# Fix ownership now that we know TARGET_USER is a real, existing user
+# (log/backup dir were created earlier, before preflight, so the log could
+# capture preflight output too).
 chown "$TARGET_USER" "$BACKUP_DIR"
-
-touch "$LOG_FILE"
 chown "$TARGET_USER" "$LOG_FILE"
-chmod 644 "$LOG_FILE"
 
-# Redirect stdout and stderr simultaneously to terminal and log file
-exec > >(tee -a "$LOG_FILE") 2>&1
+# Persist the resolved values so future runs don't need them passed again --
+# a plain re-run of this script (e.g. after fixing a failed step) will pick
+# these back up automatically and just say so.
+cat > "$STATE_FILE" <<STATEEOF
+SAVED_TARGET_USER="${TARGET_USER}"
+SAVED_NODE_HOSTNAME="${NODE_HOSTNAME}"
+STATEEOF
+chmod 600 "$STATE_FILE"
 
 echo -e "${CLR_CYN}Host: $(sysctl -n hw.model 2>/dev/null || echo unknown) | macOS $(sw_vers -productVersion 2>/dev/null || echo unknown) (build $(sw_vers -buildVersion 2>/dev/null || echo unknown)) | $(uname -m)${CLR_RST}"
 
