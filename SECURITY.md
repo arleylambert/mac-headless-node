@@ -1,6 +1,6 @@
 # Security Policy
 
-This repository provisions a Mac mini as an **unattended, always-on headless server**. To achieve that, `bootstrap_macmini_pro.sh` deliberately weakens several of macOS's default security protections. This is a trade-off made explicitly for automation and uptime — read this document before running the script, especially on hardware that isn't in a physically controlled location.
+This repository provisions a Mac mini as an **unattended, always-on headless server**. To achieve that, `bootstrap_mac_node.sh` deliberately weakens several of macOS's default security protections. This is a trade-off made explicitly for automation and uptime — read this document before running the script, especially on hardware that isn't in a physically controlled location.
 
 ## Security Trade-offs Made by This Script
 
