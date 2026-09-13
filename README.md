@@ -1,10 +1,10 @@
-# Mac mini M4 Headless & LLM Node Provisioner
+# Apple Silicon Headless & LLM Node Provisioner
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey)
 ![Shell](https://img.shields.io/badge/shell-bash-89e051)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-A single Bash script that turns a fresh **Mac mini M4 / M4 Pro** into an unattended, always-on headless server, ready for local LLM inference (Ollama, MLX, llama.cpp) and other background workloads — no monitor, no keyboard, no babysitting.
+A single Bash script that turns a fresh **Apple Silicon Mac** into an unattended, always-on headless server, ready for local LLM inference (Ollama, MLX, llama.cpp) and other background workloads — no monitor, no keyboard, no babysitting. Built and validated on a **Mac mini M4 / M4 Pro**, but nothing in it is hardware-gated to that model — see [Tested Hardware & Compatibility](#tested-hardware--compatibility) for the full picture across Mac mini, Mac Studio, Mac Pro, iMac, and MacBook.
 
 ---
 
@@ -64,13 +64,13 @@ Keeps the machine awake indefinitely, lets it wake over the network, and guarant
 </details>
 
 <details open>
-<summary><strong>High Power Mode</strong> — <code>pmset</code> (M4 Pro/Max only)</summary>
+<summary><strong>High Power Mode</strong> — <code>pmset</code> (Pro/Max/Ultra chips only)</summary>
 
 | Key | Value |
 | :--- | :--- |
 | `highpowermode` (or `perfmode`) | `1` |
 
-Unlocks elevated fan curves and sustained thermal headroom on chips that support it. Base M4 is left on the standard thermal profile.
+Unlocks elevated fan curves and sustained thermal headroom on chips that support it. Base-tier chips (plain M1–M4, no suffix) are left on the standard thermal profile.
 </details>
 
 <details open>
@@ -150,7 +150,7 @@ Full unattended recovery after a power outage requires FileVault to be disabled 
 The macOS Application Firewall is turned off entirely. **Impact:** any process binding to a network interface is reachable without a prompt. **Mitigation:** never connect this machine directly to the public internet — keep it behind a router/NAT, an edge firewall, or an isolated VLAN.
 
 ### 3. Thermal and Acoustic Output
-High Power Mode (M4 Pro) combined with `sleep 0` keeps the machine fully active 24/7. **Impact:** higher idle power draw and potentially continuous fan noise depending on workload and ambient temperature.
+High Power Mode (on Pro/Max/Ultra chips) combined with `sleep 0` keeps the machine fully active 24/7. **Impact:** higher idle power draw and potentially continuous fan noise depending on workload and ambient temperature.
 
 ### 4. File Search and Finder Limitations
 Spotlight indexing is disabled. **Impact:** `Cmd+Space` search and Finder search return nothing. **Workaround:** use `find`, `fd`, or `mdfind` from the terminal.
@@ -169,7 +169,7 @@ This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It d
 
 | Model | Status | Notes |
 | :--- | :--- | :--- |
-| **Mac mini** (M4 / M4 Pro) | ✅ Tested | Primary target of this project |
+| **Mac mini** (M4 / M4 Pro) | ✅ Tested | The hardware this project was built and validated against |
 | **Mac mini** (M1 / M2 / M2 Pro) | 🟡 Expected to work | Same headless use case, untested |
 | **Mac Studio** (M1/M2 Max/Ultra, M3 Ultra, and later) | 🟡 Expected to work | Arguably an even better fit — more sustained thermal headroom for larger models |
 | **Mac Pro** (Apple Silicon, M2 Ultra and later) | 🟡 Expected to work | Same reasoning as Mac Studio |
@@ -198,7 +198,7 @@ This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It d
 
 ## Installation & Usage
 
-1. Clone the repository onto the target Mac mini:
+1. Clone the repository onto the target Mac:
    ```bash
    git clone https://github.com/arleylambert/mac-headless-node.git
    cd mac-headless-node
