@@ -141,7 +141,18 @@ set_high_power_mode() {
 
 enable_remote_access() {
     local ok=0
-    systemsetup -setremotelogin on || ok=1
+
+    local remotelogin_output
+    remotelogin_output=$(systemsetup -setremotelogin on 2>&1)
+    if [[ $? -ne 0 ]]; then
+        ok=1
+        echo "$remotelogin_output"
+        if [[ "$remotelogin_output" == *"Full Disk Access"* ]]; then
+            echo -e "${CLR_YEL}Hint: macOS requires the app running this script (usually Terminal) to have Full Disk Access before 'systemsetup' can toggle Remote Login. This is a one-time GUI-only step Apple doesn't allow scripting around:${CLR_RST}"
+            echo -e "${CLR_YEL}  System Settings -> Privacy & Security -> Full Disk Access -> enable it for Terminal (or whichever app is running this script) -> re-run this script.${CLR_RST}"
+        fi
+    fi
+
     launchctl enable system/com.apple.screensharing || ok=1
     launchctl kickstart -k system/com.apple.screensharing 2>/dev/null || true
     return "$ok"

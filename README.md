@@ -176,7 +176,7 @@ This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It d
 
 | Model | Status | Notes |
 | :--- | :--- | :--- |
-| **Mac mini** (M4 / M4 Pro) | ✅ Tested | The hardware this project was built and validated against |
+| **Mac mini** (M4 / M4 Pro) | ✅ Tested | Validated on macOS Tahoe (26) — the hardware this project was built for |
 | **Mac mini** (M1 / M2 / M2 Pro) | 🟡 Expected to work | Same headless use case, untested |
 | **Mac Studio** (M1/M2 Max/Ultra, M3 Ultra, and later) | 🟡 Expected to work | Arguably an even better fit — more sustained thermal headroom for larger models |
 | **Mac Pro** (Apple Silicon, M2 Ultra and later) | 🟡 Expected to work | Same reasoning as Mac Studio |
@@ -190,10 +190,13 @@ This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It d
 
 ## Prerequisites
 
-1. **Clean macOS installation** — validated on macOS Sonoma and Sequoia, Apple Silicon only.
+1. **Clean macOS installation** — validated on macOS Sonoma, Sequoia, and Tahoe (26), Apple Silicon only.
 2. **Root privileges** — the script must run via `sudo`.
 3. **No `git` required** — see [Installation & Usage](#installation--usage) for a `curl`-only path if you're working with a genuinely fresh install.
-4. **FileVault disabled** before deployment:
+4. **Full Disk Access for Terminal** (or whichever app runs the script) — required by macOS before `systemsetup` is allowed to turn Remote Login (SSH) on or off. This is a one-time, GUI-only step Apple doesn't allow scripting around:
+   `System Settings → Privacy & Security → Full Disk Access → enable it for Terminal`.
+   Without this, the script still completes everything else — it just reports the SSH/Screen Sharing step as failed (with a hint pointing back here) and you re-run it after granting access.
+5. **FileVault disabled** before deployment:
    ```bash
    # Check status
    fdesetup status
