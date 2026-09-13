@@ -94,6 +94,13 @@ run_step() {
 # combinations) stays non-fatal via `|| true` and is not counted as a failure.
 
 set_hostname() {
+    local current
+    current=$(scutil --get ComputerName 2>/dev/null || echo "")
+    if [[ "$current" == "$NODE_HOSTNAME" ]]; then
+        echo "Hostname already set to '$NODE_HOSTNAME'. Skipping."
+        return 0
+    fi
+
     local ok=0
     scutil --set ComputerName "$NODE_HOSTNAME" || ok=1
     scutil --set HostName "$NODE_HOSTNAME" || ok=1
@@ -142,19 +149,29 @@ set_high_power_mode() {
 enable_remote_access() {
     local ok=0
 
-    local remotelogin_output
-    remotelogin_output=$(systemsetup -setremotelogin on 2>&1)
-    if [[ $? -ne 0 ]]; then
-        ok=1
-        echo "$remotelogin_output"
-        if [[ "$remotelogin_output" == *"Full Disk Access"* ]]; then
-            echo -e "${CLR_YEL}Hint: macOS requires the app running this script (usually Terminal) to have Full Disk Access before 'systemsetup' can toggle Remote Login. This is a one-time GUI-only step Apple doesn't allow scripting around:${CLR_RST}"
-            echo -e "${CLR_YEL}  System Settings -> Privacy & Security -> Full Disk Access -> enable it for Terminal (or whichever app is running this script) -> re-run this script.${CLR_RST}"
+    local remotelogin_status
+    remotelogin_status=$(systemsetup -getremotelogin 2>/dev/null)
+    if [[ "$remotelogin_status" == *"On"* ]]; then
+        echo "Remote Login (SSH) already enabled. Skipping."
+    else
+        local remotelogin_output
+        remotelogin_output=$(systemsetup -setremotelogin on 2>&1)
+        if [[ $? -ne 0 ]]; then
+            ok=1
+            echo "$remotelogin_output"
+            if [[ "$remotelogin_output" == *"Full Disk Access"* ]]; then
+                echo -e "${CLR_YEL}Hint: macOS requires the app running this script (usually Terminal) to have Full Disk Access before 'systemsetup' can toggle Remote Login. This is a one-time GUI-only step Apple doesn't allow scripting around:${CLR_RST}"
+                echo -e "${CLR_YEL}  System Settings -> Privacy & Security -> Full Disk Access -> enable it for Terminal (or whichever app is running this script) -> re-run this script.${CLR_RST}"
+            fi
         fi
     fi
 
-    launchctl enable system/com.apple.screensharing || ok=1
-    launchctl kickstart -k system/com.apple.screensharing 2>/dev/null || true
+    if launchctl print system/com.apple.screensharing >/dev/null 2>&1; then
+        echo "Screen Sharing already enabled. Skipping."
+    else
+        launchctl enable system/com.apple.screensharing || ok=1
+        launchctl kickstart -k system/com.apple.screensharing 2>/dev/null || true
+    fi
     return "$ok"
 }
 
@@ -162,6 +179,11 @@ tune_ssh_keepalive() {
     local sshd_config="/etc/ssh/sshd_config"
     if [[ ! -f "$sshd_config" ]]; then
         echo -e "${CLR_YEL}Warning: ${sshd_config} not found. Skipping SSH keepalive tuning.${CLR_RST}"
+        return 0
+    fi
+
+    if grep -q "^ClientAliveInterval 30" "$sshd_config" && grep -q "^ClientAliveCountMax 5" "$sshd_config"; then
+        echo "SSH keepalive already configured (ClientAliveInterval 30 / ClientAliveCountMax 5). Skipping."
         return 0
     fi
 
@@ -187,6 +209,12 @@ tune_ssh_keepalive() {
 }
 
 disable_firewall() {
+    local state
+    state=$(/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null)
+    if [[ "$state" == *"disabled"* ]]; then
+        echo "Application Firewall already disabled. Skipping."
+        return 0
+    fi
     /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off 2>/dev/null || true
 }
 
@@ -196,6 +224,8 @@ remove_unneeded_apps() {
         local path="/Applications/${app}.app"
         if [[ -e "$path" ]]; then
             rm -rf "$path" || ok=1
+        else
+            echo "${app}.app already removed (or never installed). Skipping."
         fi
     done
     return "$ok"
@@ -231,12 +261,21 @@ set_manual_updates() {
 }
 
 disable_spotlight() {
+    if mdutil -s / 2>/dev/null | grep -q "Indexing disabled"; then
+        echo "Spotlight indexing already disabled. Skipping."
+        return 0
+    fi
     mdutil -a -i off 2>/dev/null || true
 }
 
 set_unified_memory_limit() {
     local ok=0
     sysctl -w iogpu.wired_mem_limit=90 2>/dev/null || true
+
+    if [[ -f /etc/sysctl.conf ]] && grep -q "^iogpu.wired_mem_limit=90$" /etc/sysctl.conf; then
+        echo "/etc/sysctl.conf already has iogpu.wired_mem_limit=90. Skipping file edit."
+        return "$ok"
+    fi
 
     if [[ -f /etc/sysctl.conf ]]; then
         cp /etc/sysctl.conf "${BACKUP_DIR}/sysctl.conf.bak" || ok=1
@@ -253,6 +292,12 @@ set_unified_memory_limit() {
 
 set_maxfiles_limit() {
     local plist_path="/Library/LaunchDaemons/limit.maxfiles.plist"
+
+    if [[ -f "$plist_path" ]] && launchctl print system/limit.maxfiles >/dev/null 2>&1; then
+        echo "maxfiles LaunchDaemon already installed and loaded (524288/524288). Skipping."
+        return 0
+    fi
+
     cat <<EOF > "$plist_path"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
