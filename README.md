@@ -141,7 +141,7 @@ Removes `Keynote.app`, `Numbers.app`, `Pages.app`, `GarageBand.app`, and `iMovie
 <details>
 <summary><strong>Dev Tooling</strong> — Xcode Command Line Tools &amp; Homebrew</summary>
 
-Runs as the last step. Installs the Xcode Command Line Tools (which is what actually provides `git`) via `softwareupdate` — not `xcode-select --install`, which pops an interactive GUI dialog with no unattended equivalent — then installs [Homebrew](https://brew.sh) non-interactively as `TARGET_USER` (Homebrew refuses to run as root) and adds it to that user's `~/.zprofile`. Both steps are skipped if already present, and both **require internet access on the target machine** — if you provisioned it offline (see [Option C](#option-c--offline-transfer-usb-drive-airdrop-etc)), this step will report as failed rather than block the rest of the script; connect it to the network and re-run later, or install manually.
+Runs as the last step. Installs the Xcode Command Line Tools (which is what actually provides `git`) via `softwareupdate` — not `xcode-select --install`, which pops an interactive GUI dialog with no unattended equivalent — then installs [Homebrew](https://brew.sh) for `TARGET_USER` by creating and `chown`-ing `/opt/homebrew` as root and extracting the brew tarball directly (Homebrew's documented method for non-interactive installs) rather than running its official `install.sh`, which needs an interactive `sudo` password mid-install that this script has no way to supply — and adds brew to that user's `~/.zprofile`. Both steps are skipped if already present, and both **require internet access on the target machine** — if you provisioned it offline (see [Option C](#option-c--offline-transfer-usb-drive-airdrop-etc)), this step will report as failed rather than block the rest of the script; connect it to the network and re-run later, or install manually.
 </details>
 
 ---
@@ -176,7 +176,7 @@ This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It d
 
 | Model | Status | Notes |
 | :--- | :--- | :--- |
-| **Mac mini** (M4 / M4 Pro) | ✅ Tested | The hardware this project was built and validated against |
+| **Mac mini** (M4 / M4 Pro) | ✅ Tested | Validated on macOS Tahoe (26) — the hardware this project was built for |
 | **Mac mini** (M1 / M2 / M2 Pro) | 🟡 Expected to work | Same headless use case, untested |
 | **Mac Studio** (M1/M2 Max/Ultra, M3 Ultra, and later) | 🟡 Expected to work | Arguably an even better fit — more sustained thermal headroom for larger models |
 | **Mac Pro** (Apple Silicon, M2 Ultra and later) | 🟡 Expected to work | Same reasoning as Mac Studio |
@@ -190,10 +190,13 @@ This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It d
 
 ## Prerequisites
 
-1. **Clean macOS installation** — validated on macOS Sonoma and Sequoia, Apple Silicon only.
+1. **Clean macOS installation** — validated on macOS Sonoma, Sequoia, and Tahoe (26), Apple Silicon only.
 2. **Root privileges** — the script must run via `sudo`.
 3. **No `git` required** — see [Installation & Usage](#installation--usage) for a `curl`-only path if you're working with a genuinely fresh install.
-4. **FileVault disabled** before deployment:
+4. **Full Disk Access for Terminal** (or whichever app runs the script) — required by macOS before `systemsetup` is allowed to turn Remote Login (SSH) on or off. This is a one-time, GUI-only step Apple doesn't allow scripting around:
+   `System Settings → Privacy & Security → Full Disk Access → enable it for Terminal`.
+   Without this, the script still completes everything else — it just reports the SSH/Screen Sharing step as failed (with a hint pointing back here) and you re-run it after granting access.
+5. **FileVault disabled** before deployment:
    ```bash
    # Check status
    fdesetup status
