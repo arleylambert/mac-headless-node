@@ -663,13 +663,13 @@ if [[ ${#SUCCESS_STEPS[@]} -gt 0 ]]; then
     done
 fi
 
-echo -e "\n${CLR_RED}--- FAILED STEPS (${#FAILED_STEPS[@]}) ---${CLR_RST}"
 if [[ ${#FAILED_STEPS[@]} -gt 0 ]]; then
+    echo -e "\n${CLR_RED}--- FAILED STEPS (${#FAILED_STEPS[@]}) ---${CLR_RST}"
     for item in "${FAILED_STEPS[@]}"; do
         echo -e "${CLR_RED} [✖] ${item}${CLR_RST}"
     done
 else
-    echo -e "${CLR_GRN}No failures reported.${CLR_RST}"
+    echo -e "\n${CLR_GRN}No failures reported.${CLR_RST}"
 fi
 
 if [[ "$FDA_SSH_ISSUE" == "1" ]]; then
