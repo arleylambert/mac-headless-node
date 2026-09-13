@@ -33,6 +33,7 @@ A single Bash script that turns a fresh **Apple Silicon Mac** into an unattended
 - **Bloatware Stripping** — removes `Keynote`, `Numbers`, `Pages`, `GarageBand`, and `iMovie` from `/Applications`.
 - **System Stability** — disables automatic OS updates/reboots and Spotlight indexing, to avoid surprise interruptions and unnecessary disk writes.
 - **Auditability & Safe Execution** — colored console reporting, timestamped logs, and config backups before every edit.
+- **Dev Tooling Bootstrap** — installs Xcode Command Line Tools (`git`) and Homebrew unattended, as the last step, if they aren't already present.
 
 ---
 
@@ -135,6 +136,12 @@ Lets Metal buffers use up to 90% of Unified Memory (instead of the conservative 
 <summary><strong>Application Removal</strong> — <code>/Applications</code></summary>
 
 Removes `Keynote.app`, `Numbers.app`, `Pages.app`, `GarageBand.app`, and `iMovie.app` if present.
+</details>
+
+<details>
+<summary><strong>Dev Tooling</strong> — Xcode Command Line Tools &amp; Homebrew</summary>
+
+Runs as the last step. Installs the Xcode Command Line Tools (which is what actually provides `git`) via `softwareupdate` — not `xcode-select --install`, which pops an interactive GUI dialog with no unattended equivalent — then installs [Homebrew](https://brew.sh) non-interactively as `TARGET_USER` (Homebrew refuses to run as root) and adds it to that user's `~/.zprofile`. Both steps are skipped if already present, and both **require internet access on the target machine** — if you provisioned it offline (see [Option C](#option-c--offline-transfer-usb-drive-airdrop-etc)), this step will report as failed rather than block the rest of the script; connect it to the network and re-run later, or install manually.
 </details>
 
 ---
