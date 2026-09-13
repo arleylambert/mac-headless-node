@@ -40,7 +40,7 @@ A single Bash script that turns a fresh **Apple Silicon Mac** into an unattended
 
 Each block below is one area of macOS the script touches: what gets set, and why. Every original file the script edits is backed up first (see [Logging & Backups](#logging--backups)).
 
-<details open>
+<details>
 <summary><strong>System Identity</strong> — <code>scutil</code></summary>
 
 | Key | Value |
@@ -50,7 +50,7 @@ Each block below is one area of macOS the script touches: what gets set, and why
 Keeps the POSIX hostname, Bonjour/mDNS name, and NetBIOS identity in sync, so you don't end up with a duplicate `machine-2.local` on the network.
 </details>
 
-<details open>
+<details>
 <summary><strong>Power Management</strong> — <code>pmset</code></summary>
 
 | Key | Value |
@@ -63,7 +63,7 @@ Keeps the POSIX hostname, Bonjour/mDNS name, and NetBIOS identity in sync, so yo
 Keeps the machine awake indefinitely, lets it wake over the network, and guarantees it powers back on after an outage.
 </details>
 
-<details open>
+<details>
 <summary><strong>High Power Mode</strong> — <code>pmset</code> (Pro/Max/Ultra chips only)</summary>
 
 | Key | Value |
@@ -73,7 +73,7 @@ Keeps the machine awake indefinitely, lets it wake over the network, and guarant
 Unlocks elevated fan curves and sustained thermal headroom on chips that support it. Base-tier chips (plain M1–M4, no suffix) are left on the standard thermal profile.
 </details>
 
-<details open>
+<details>
 <summary><strong>Remote Access</strong> — SSH & Screen Sharing</summary>
 
 | Key | Value |
@@ -85,7 +85,7 @@ Unlocks elevated fan curves and sustained thermal headroom on chips that support
 Turns on SSH and native VNC (Screen Sharing, port 5900) and tunes SSH keep-alives so headless sessions don't get silently dropped.
 </details>
 
-<details open>
+<details>
 <summary><strong>Application Firewall</strong> — <code>socketfilterfw</code></summary>
 
 | Key | Value |
