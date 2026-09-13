@@ -185,7 +185,8 @@ This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It d
 
 1. **Clean macOS installation** — validated on macOS Sonoma and Sequoia, Apple Silicon only.
 2. **Root privileges** — the script must run via `sudo`.
-3. **FileVault disabled** before deployment:
+3. **No `git` required** — see [Installation & Usage](#installation--usage) for a `curl`-only path if you're working with a genuinely fresh install.
+4. **FileVault disabled** before deployment:
    ```bash
    # Check status
    fdesetup status
@@ -198,26 +199,35 @@ This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It d
 
 ## Installation & Usage
 
-1. Clone the repository onto the target Mac:
-   ```bash
-   git clone https://github.com/arleylambert/mac-headless-node.git
-   cd mac-headless-node
-   ```
+A clean macOS install does **not** ship with `git` — the first time you run it, macOS prompts you to install the Xcode Command Line Tools, which is an interactive GUI dialog and needs an internet connection of its own. That's fine if you're setting the machine up in person, but it gets in the way of a fast, scriptable bootstrap. Pick the path that fits:
 
-2. Make the script executable:
-   ```bash
-   chmod +x bootstrap_mac_node.sh
-   ```
+### Option A — No `git` required (recommended for a fresh machine)
 
-3. Run it:
-   ```bash
-   sudo ./bootstrap_mac_node.sh <TARGET_USERNAME> [OPTIONAL_NODE_HOSTNAME]
-   ```
+`curl` is preinstalled on every Mac, so you can pull just the script directly:
 
-   **Example:**
-   ```bash
-   sudo ./bootstrap_mac_node.sh admin macmini-node01
-   ```
+```bash
+curl -O https://raw.githubusercontent.com/arleylambert/mac-headless-node/main/bootstrap_mac_node.sh
+chmod +x bootstrap_mac_node.sh
+sudo ./bootstrap_mac_node.sh <TARGET_USERNAME> [OPTIONAL_NODE_HOSTNAME]
+```
+
+This gets you only the script — enough to run it. Grab the [README](README.md) and [SECURITY.md](SECURITY.md) separately (or read them here on GitHub) if you want the full documentation on the machine too.
+
+### Option B — Full clone (if `git` is already installed, or you don't mind installing it)
+
+```bash
+git clone https://github.com/arleylambert/mac-headless-node.git
+cd mac-headless-node
+chmod +x bootstrap_mac_node.sh
+sudo ./bootstrap_mac_node.sh <TARGET_USERNAME> [OPTIONAL_NODE_HOSTNAME]
+```
+
+Useful if you plan to track updates, contribute changes, or just prefer having the whole repository (docs included) on the box.
+
+**Example (either option):**
+```bash
+sudo ./bootstrap_mac_node.sh admin macmini-node01
+```
 
 ---
 
