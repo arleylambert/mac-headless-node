@@ -372,7 +372,13 @@ install_dev_tools() {
         su - "$TARGET_USER" -c "curl -fsSL https://github.com/Homebrew/brew/tarball/main | tar xz --strip-components 1 -C '${brew_prefix}'" || ok=1
 
         # Put brew on PATH for future login shells (Apple Silicon prefix).
-        local brew_shellenv='eval "$(/opt/homebrew/bin/brew shellenv)"'
+        # Guarded with [[ -x ... ]] so a login shell never prints a "no such
+        # file" error during the brief window before brew actually exists
+        # (e.g. mid-install, or if it's ever removed later). An older run of
+        # this script may have already appended the unguarded version; once
+        # brew actually exists that line is harmless, so it's left alone
+        # rather than risk a fragile in-place edit of the user's dotfile.
+        local brew_shellenv='[[ -x /opt/homebrew/bin/brew ]] && eval "$(/opt/homebrew/bin/brew shellenv)"'
         su - "$TARGET_USER" -c "grep -qxF '${brew_shellenv}' ~/.zprofile 2>/dev/null || echo '${brew_shellenv}' >> ~/.zprofile" || ok=1
 
         # First-run update, non-fatal (brew is already usable without it).
