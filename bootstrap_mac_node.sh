@@ -297,19 +297,30 @@ install_dev_tools() {
         rm -f "$clt_placeholder"
     fi
 
-    # Homebrew explicitly refuses to run its installer as root, so this has
-    # to run as TARGET_USER, not root. NONINTERACTIVE=1 skips Homebrew's own
-    # confirmation prompt (it still needs the Command Line Tools above and a
-    # working internet connection).
-    if su - "$TARGET_USER" -c 'command -v brew' >/dev/null 2>&1; then
+    # Homebrew's official install.sh performs several sudo-gated steps
+    # (creating/chowning /opt/homebrew) that need an interactive password
+    # prompt from TARGET_USER — not available when this runs unattended via
+    # `su -c` inside an already-root script. Instead, do the one privileged
+    # part ourselves (create + chown the prefix, since we're root already),
+    # then extract the brew tarball directly as TARGET_USER with no sudo
+    # calls left in the path at all. This is Homebrew's own documented
+    # method for non-interactive/alternative installs.
+    local brew_prefix="/opt/homebrew"
+    if su - "$TARGET_USER" -c "command -v ${brew_prefix}/bin/brew" >/dev/null 2>&1; then
         echo "Homebrew already installed for $TARGET_USER."
     else
-        echo "Installing Homebrew for $TARGET_USER (non-interactive)..."
-        su - "$TARGET_USER" -c 'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' || ok=1
+        echo "Installing Homebrew for $TARGET_USER (non-interactive, no sudo prompts)..."
+        mkdir -p "$brew_prefix" || ok=1
+        chown -R "${TARGET_USER}:admin" "$brew_prefix" 2>/dev/null || chown -R "$TARGET_USER" "$brew_prefix" || ok=1
+
+        su - "$TARGET_USER" -c "curl -fsSL https://github.com/Homebrew/brew/tarball/main | tar xz --strip-components 1 -C '${brew_prefix}'" || ok=1
 
         # Put brew on PATH for future login shells (Apple Silicon prefix).
-        local brew_shellenv='''eval "$(/opt/homebrew/bin/brew shellenv)"'''
+        local brew_shellenv='eval "$(/opt/homebrew/bin/brew shellenv)"'
         su - "$TARGET_USER" -c "grep -qxF '${brew_shellenv}' ~/.zprofile 2>/dev/null || echo '${brew_shellenv}' >> ~/.zprofile" || ok=1
+
+        # First-run update, non-fatal (brew is already usable without it).
+        su - "$TARGET_USER" -c "eval \"\$(${brew_prefix}/bin/brew shellenv)\" && brew update --force --quiet" >/dev/null 2>&1 || true
     fi
 
     return "$ok"
