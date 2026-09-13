@@ -28,24 +28,74 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-if [[ -z "$TARGET_USER" ]]; then
-    echo -e "${CLR_RED}Error: Target username required as the first argument.${CLR_RST}"
-    echo "Usage: sudo bash $0 <username> [node_hostname]"
-    exit 1
-fi
+# --- Preflight Checks ---
+#
+# Everything below is checked *before* the script touches the system at all.
+# Every problem found is collected and printed together with the exact steps
+# to fix it, instead of failing once, getting fixed, re-run, failing on the
+# next thing, etc.
 
-if ! id "$TARGET_USER" >/dev/null 2>&1; then
-    echo -e "${CLR_RED}Error: Target user '$TARGET_USER' does not exist on this system.${CLR_RST}"
-    exit 1
+declare -a PREFLIGHT_ERRORS=()
+
+if [[ -z "$TARGET_USER" ]]; then
+    PREFLIGHT_ERRORS+=("Target username required as the first argument.
+      Usage: sudo bash $0 <username> [node_hostname]")
+elif ! id "$TARGET_USER" >/dev/null 2>&1; then
+    PREFLIGHT_ERRORS+=("Target user '$TARGET_USER' does not exist on this system.
+      Create it first (System Settings -> Users & Groups -> Add Account),
+      or pass the correct existing username as the first argument.")
 fi
 
 # Optional hostname must be a valid RFC-1123 label if provided (letters, digits,
 # hyphens; no leading/trailing hyphen) so scutil doesn't get fed something that
 # breaks Bonjour/mDNS resolution.
 if [[ -n "$NODE_HOSTNAME" ]] && ! [[ "$NODE_HOSTNAME" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]]; then
-    echo -e "${CLR_RED}Error: '$NODE_HOSTNAME' is not a valid hostname (letters, digits, hyphens only; cannot start/end with a hyphen).${CLR_RST}"
+    PREFLIGHT_ERRORS+=("'$NODE_HOSTNAME' is not a valid hostname (letters, digits, hyphens only; cannot start/end with a hyphen).
+      Example of a valid hostname: macmini-node01")
+fi
+
+if fdesetup status 2>/dev/null | grep -q "FileVault is On"; then
+    PREFLIGHT_ERRORS+=("FileVault is currently ENABLED. This script assumes it's off so the
+      machine can auto-login and reboot unattended after a power cut (see
+      SECURITY.md for that trade-off). To disable it:
+        1. Check status:   fdesetup status
+        2. Disable it:     sudo fdesetup disable
+        3. Follow the prompts (may require a reboot to fully apply, then
+           re-run this script)")
+fi
+
+# Best-effort: the 'Enable Remote Login' step later needs Full Disk Access
+# granted to whatever app is running this script (usually Terminal), which
+# macOS only lets a human grant via the GUI. There's no reliable way to query
+# that grant directly, so this probes the read-only equivalent of the command
+# that will actually fail and catches it here when possible -- if it doesn't
+# catch it, the later step will, with the same instructions.
+fda_probe=$(systemsetup -getremotelogin 2>&1)
+if [[ "$fda_probe" == *"Full Disk Access"* ]]; then
+    PREFLIGHT_ERRORS+=("Full Disk Access is not granted to the app running this script
+      (usually Terminal). macOS requires this before 'systemsetup' can read
+      or change Remote Login (SSH). To fix:
+        1. Open System Settings -> Privacy & Security -> Full Disk Access
+        2. Enable the toggle for Terminal (or whichever app is running this
+           script)
+        3. Re-run this script")
+fi
+
+if [[ ${#PREFLIGHT_ERRORS[@]} -gt 0 ]]; then
+    echo -e "${CLR_RED}=================================================="
+    echo -e "     ${#PREFLIGHT_ERRORS[@]} PREFLIGHT CHECK(S) FAILED — NOTHING WAS CHANGED     "
+    echo -e "==================================================${CLR_RST}"
+    i=1
+    for err in "${PREFLIGHT_ERRORS[@]}"; do
+        echo -e "${CLR_RED}[$i] ${err}${CLR_RST}"
+        echo ""
+        i=$((i + 1))
+    done
+    echo -e "${CLR_YEL}Fix the item(s) above, then re-run this script.${CLR_RST}"
     exit 1
 fi
+
+echo -e "${CLR_GRN}Preflight checks passed.${CLR_RST}"
 
 # Local Log File and Backup Directory Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
