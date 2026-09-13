@@ -206,17 +206,17 @@ This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It d
 
 2. Make the script executable:
    ```bash
-   chmod +x bootstrap_macmini_pro.sh
+   chmod +x bootstrap_mac_node.sh
    ```
 
 3. Run it:
    ```bash
-   sudo ./bootstrap_macmini_pro.sh <TARGET_USERNAME> [OPTIONAL_NODE_HOSTNAME]
+   sudo ./bootstrap_mac_node.sh <TARGET_USERNAME> [OPTIONAL_NODE_HOSTNAME]
    ```
 
    **Example:**
    ```bash
-   sudo ./bootstrap_macmini_pro.sh admin macmini-node01
+   sudo ./bootstrap_mac_node.sh admin macmini-node01
    ```
 
 ---
