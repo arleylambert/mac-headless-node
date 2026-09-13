@@ -12,6 +12,11 @@ CLR_BLU="\033[1;34m"
 CLR_CYN="\033[1;36m"
 CLR_RST="\033[0m"
 
+if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo -e "${CLR_RED}Error: This script only supports macOS (Darwin). Detected: $(uname -s).${CLR_RST}"
+    exit 1
+fi
+
 if [[ $EUID -ne 0 ]]; then
     echo -e "${CLR_RED}Error: This script must be run as root (sudo).${CLR_RST}"
     exit 1
@@ -25,6 +30,14 @@ fi
 
 if ! id "$TARGET_USER" >/dev/null 2>&1; then
     echo -e "${CLR_RED}Error: Target user '$TARGET_USER' does not exist on this system.${CLR_RST}"
+    exit 1
+fi
+
+# Optional hostname must be a valid RFC-1123 label if provided (letters, digits,
+# hyphens; no leading/trailing hyphen) so scutil doesn't get fed something that
+# breaks Bonjour/mDNS resolution.
+if [[ -n "$NODE_HOSTNAME" ]] && ! [[ "$NODE_HOSTNAME" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]]; then
+    echo -e "${CLR_RED}Error: '$NODE_HOSTNAME' is not a valid hostname (letters, digits, hyphens only; cannot start/end with a hyphen).${CLR_RST}"
     exit 1
 fi
 
@@ -51,7 +64,7 @@ run_step() {
     local step_name="$1"
     shift
     echo -e "\n${CLR_BLU}[$(date '+%Y-%m-%d %H:%M:%S')] Executing: ${step_name}...${CLR_RST}"
-    
+
     if "$@"; then
         echo -e "${CLR_GRN}✔ Success: ${step_name}${CLR_RST}"
         SUCCESS_STEPS+=("$step_name")
@@ -65,57 +78,93 @@ run_step() {
 }
 
 # --- Modular Functions ---
+#
+# Each function below tracks its own internal failures explicitly (rather than
+# relying on the exit code of its last command) so that run_step's pass/fail
+# report is accurate even when a function runs several independent commands.
+# A sub-command that is genuinely optional (not supported on all macOS/chip
+# combinations) stays non-fatal via `|| true` and is not counted as a failure.
 
 set_hostname() {
-    scutil --set ComputerName "$NODE_HOSTNAME"
-    scutil --set HostName "$NODE_HOSTNAME"
-    scutil --set LocalHostName "$NODE_HOSTNAME"
-    dscacheutil -flushcache
+    local ok=0
+    scutil --set ComputerName "$NODE_HOSTNAME" || ok=1
+    scutil --set HostName "$NODE_HOSTNAME" || ok=1
+    scutil --set LocalHostName "$NODE_HOSTNAME" || ok=1
+    dscacheutil -flushcache || ok=1
+    return "$ok"
 }
 
 set_power_policies() {
-    pmset -a sleep 0
-    pmset -a displaysleep 0
-    pmset -a disksleep 0 2>/dev/null || true
-    pmset -a womp 1
-    pmset -a autorestart 1
-    pmset -a powernap 0 2>/dev/null || true
-    pmset -a tcpkeepalive 1
-    pmset -a standby 0 2>/dev/null || true
-    pmset -a autopoweroff 0 2>/dev/null || true
+    local ok=0
+    pmset -a sleep 0 || ok=1
+    pmset -a displaysleep 0 || ok=1
+    pmset -a disksleep 0 2>/dev/null || true   # not present on all chip/OS combos
+    pmset -a womp 1 || ok=1
+    pmset -a autorestart 1 || ok=1
+    pmset -a powernap 0 2>/dev/null || true    # not present on all chip/OS combos
+    pmset -a tcpkeepalive 1 || ok=1
+    pmset -a standby 0 2>/dev/null || true     # not present on all chip/OS combos
+    pmset -a autopoweroff 0 2>/dev/null || true # not present on all chip/OS combos
+    return "$ok"
 }
 
 set_high_power_mode() {
     local chip_model
     chip_model=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "")
-    if [[ "$chip_model" =~ "Pro" ]]; then
-        if pmset -g cap | grep -q "perfmode"; then
-            pmset -a perfmode 1
-        elif pmset -g cap | grep -q "highpower"; then
-            pmset -a highpower 1
-        fi
-    else
+    if [[ "$chip_model" != *"Pro"* && "$chip_model" != *"Max"* && "$chip_model" != *"Ultra"* ]]; then
         echo "Base M4 chip detected ($chip_model). Standard thermal profile retained."
+        return 0
     fi
+
+    # macOS exposes "High Power Mode" via different pmset keys depending on
+    # version/hardware. Try the known keys in order and only fail the step if
+    # none of them are accepted on this machine.
+    local key
+    for key in highpowermode perfmode highpower; do
+        if pmset -a "$key" 1 2>/dev/null; then
+            echo "Enabled High Power Mode via 'pmset -a ${key} 1'."
+            return 0
+        fi
+    done
+
+    echo -e "${CLR_YEL}Warning: could not find a supported High Power Mode key (tried highpowermode/perfmode/highpower) on this macOS version. Skipping.${CLR_RST}"
+    return 0
 }
 
 enable_remote_access() {
-    systemsetup -setremotelogin on
-    launchctl enable system/com.apple.screensharing
+    local ok=0
+    systemsetup -setremotelogin on || ok=1
+    launchctl enable system/com.apple.screensharing || ok=1
     launchctl kickstart -k system/com.apple.screensharing 2>/dev/null || true
+    return "$ok"
 }
 
 tune_ssh_keepalive() {
     local sshd_config="/etc/ssh/sshd_config"
-    if [[ -f "$sshd_config" ]]; then
-        cp "$sshd_config" "${BACKUP_DIR}/sshd_config.bak"
-        grep -q "^ClientAliveInterval" "$sshd_config" && \
-            sed -i '' 's/^ClientAliveInterval.*/ClientAliveInterval 30/' "$sshd_config" || \
-            echo "ClientAliveInterval 30" >> "$sshd_config"
-        grep -q "^ClientAliveCountMax" "$sshd_config" && \
-            sed -i '' 's/^ClientAliveCountMax.*/ClientAliveCountMax 5/' "$sshd_config" || \
-            echo "ClientAliveCountMax 5" >> "$sshd_config"
+    if [[ ! -f "$sshd_config" ]]; then
+        echo -e "${CLR_YEL}Warning: ${sshd_config} not found. Skipping SSH keepalive tuning.${CLR_RST}"
+        return 0
     fi
+
+    cp "$sshd_config" "${BACKUP_DIR}/sshd_config.bak" || return 1
+
+    if grep -q "^ClientAliveInterval" "$sshd_config"; then
+        sed -i '' 's/^ClientAliveInterval.*/ClientAliveInterval 30/' "$sshd_config" || return 1
+    else
+        echo "ClientAliveInterval 30" >> "$sshd_config"
+    fi
+
+    if grep -q "^ClientAliveCountMax" "$sshd_config"; then
+        sed -i '' 's/^ClientAliveCountMax.*/ClientAliveCountMax 5/' "$sshd_config" || return 1
+    else
+        echo "ClientAliveCountMax 5" >> "$sshd_config"
+    fi
+
+    # sshd only picks up config changes on restart; this host reboots at the
+    # end of the post-execution checklist, which covers it. If SSH is already
+    # in active use and a reboot is deferred, restart it explicitly instead:
+    #   sudo launchctl kickstart -k system/com.openssh.sshd
+    return 0
 }
 
 disable_firewall() {
@@ -123,34 +172,43 @@ disable_firewall() {
 }
 
 remove_unneeded_apps() {
-    rm -rf /Applications/Keynote.app \
-           /Applications/Numbers.app \
-           /Applications/Pages.app \
-           /Applications/GarageBand.app \
-           /Applications/iMovie.app 2>/dev/null || true
+    local app ok=0
+    for app in Keynote Numbers Pages GarageBand iMovie; do
+        local path="/Applications/${app}.app"
+        if [[ -e "$path" ]]; then
+            rm -rf "$path" || ok=1
+        fi
+    done
+    return "$ok"
 }
 
 clean_dock_and_ui() {
-    su - "$TARGET_USER" -c 'defaults write com.apple.dock persistent-apps -array'
-    su - "$TARGET_USER" -c 'defaults write com.apple.dock show-recents -bool false'
-    su - "$TARGET_USER" -c 'defaults write com.apple.dock launchanim -bool false'
-    su - "$TARGET_USER" -c 'defaults write NSGlobalDomain NSAutomaticWindowAnimationsEnabled -bool false'
-    su - "$TARGET_USER" -c 'defaults write -g QLPanelAnimationDuration -float 0'
-    su - "$TARGET_USER" -c 'defaults write NSGlobalDomain NSWindowResizeTime -float 0.001'
-    su - "$TARGET_USER" -c 'defaults write com.apple.CrashReporter DialogType none'
+    local ok=0
+    su - "$TARGET_USER" -c 'defaults write com.apple.dock persistent-apps -array' || ok=1
+    su - "$TARGET_USER" -c 'defaults write com.apple.dock show-recents -bool false' || ok=1
+    su - "$TARGET_USER" -c 'defaults write com.apple.dock launchanim -bool false' || ok=1
+    su - "$TARGET_USER" -c 'defaults write NSGlobalDomain NSAutomaticWindowAnimationsEnabled -bool false' || ok=1
+    su - "$TARGET_USER" -c 'defaults write -g QLPanelAnimationDuration -float 0' || ok=1
+    su - "$TARGET_USER" -c 'defaults write NSGlobalDomain NSWindowResizeTime -float 0.001' || ok=1
+    su - "$TARGET_USER" -c 'defaults write com.apple.CrashReporter DialogType none' || ok=1
     su - "$TARGET_USER" -c 'killall Dock 2>/dev/null || true'
+    return "$ok"
 }
 
 disable_telemetry_and_siri() {
-    su - "$TARGET_USER" -c 'defaults write com.apple.assistant.support "Assistant Enabled" -bool false'
-    defaults write /Library/Preferences/com.apple.assistant.support "Assistant Enabled" -bool false
-    defaults write /Library/Preferences/com.apple.SubmitDiagInfo AutoSubmit -bool false
-    defaults write /Library/Preferences/com.apple.SubmitDiagInfo AutoSubmitVersion -int 4
+    local ok=0
+    su - "$TARGET_USER" -c 'defaults write com.apple.assistant.support "Assistant Enabled" -bool false' || ok=1
+    defaults write /Library/Preferences/com.apple.assistant.support "Assistant Enabled" -bool false || ok=1
+    defaults write /Library/Preferences/com.apple.SubmitDiagInfo AutoSubmit -bool false || ok=1
+    defaults write /Library/Preferences/com.apple.SubmitDiagInfo AutoSubmitVersion -int 4 || ok=1
+    return "$ok"
 }
 
 set_manual_updates() {
-    defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticDownload -bool false
-    defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates -bool false
+    local ok=0
+    defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticDownload -bool false || ok=1
+    defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates -bool false || ok=1
+    return "$ok"
 }
 
 disable_spotlight() {
@@ -158,17 +216,20 @@ disable_spotlight() {
 }
 
 set_unified_memory_limit() {
+    local ok=0
     sysctl -w iogpu.wired_mem_limit=90 2>/dev/null || true
+
     if [[ -f /etc/sysctl.conf ]]; then
-        cp /etc/sysctl.conf "${BACKUP_DIR}/sysctl.conf.bak"
+        cp /etc/sysctl.conf "${BACKUP_DIR}/sysctl.conf.bak" || ok=1
         if grep -q "iogpu.wired_mem_limit" /etc/sysctl.conf; then
-            sed -i '' 's/iogpu.wired_mem_limit=.*/iogpu.wired_mem_limit=90/' /etc/sysctl.conf
+            sed -i '' 's/iogpu.wired_mem_limit=.*/iogpu.wired_mem_limit=90/' /etc/sysctl.conf || ok=1
         else
             echo "iogpu.wired_mem_limit=90" >> /etc/sysctl.conf
         fi
     else
         echo "iogpu.wired_mem_limit=90" > /etc/sysctl.conf
     fi
+    return "$ok"
 }
 
 set_maxfiles_limit() {
@@ -195,9 +256,10 @@ set_maxfiles_limit() {
 </dict>
 </plist>
 EOF
-    chown root:wheel "$plist_path"
-    chmod 644 "$plist_path"
+    chown root:wheel "$plist_path" || return 1
+    chmod 644 "$plist_path" || return 1
     launchctl load -w "$plist_path" 2>/dev/null || true
+    return 0
 }
 
 # --- Main Step Execution ---
