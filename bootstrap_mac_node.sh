@@ -270,6 +270,51 @@ EOF
     return 0
 }
 
+install_dev_tools() {
+    local ok=0
+
+    # Xcode Command Line Tools (this is what actually provides `git` on a
+    # clean macOS install). `xcode-select --install` pops an interactive GUI
+    # dialog with no unattended equivalent, so use softwareupdate instead,
+    # which can install it headlessly.
+    if xcode-select -p >/dev/null 2>&1; then
+        echo "Xcode Command Line Tools already installed."
+    else
+        local clt_placeholder="/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress"
+        touch "$clt_placeholder"
+
+        local clt_label
+        clt_label=$(softwareupdate -l 2>/dev/null | awk -F': ' '/Label: .*Command Line Tools/{print $2}' | tail -1)
+
+        if [[ -n "$clt_label" ]]; then
+            echo "Installing Command Line Tools via softwareupdate ($clt_label)..."
+            softwareupdate -i "$clt_label" --verbose || ok=1
+        else
+            echo -e "${CLR_YEL}Warning: no Command Line Tools package found via 'softwareupdate -l' (needs internet, and availability varies by macOS version/region). Skipping — install manually later with 'xcode-select --install' or 'sudo softwareupdate -i <label>'.${CLR_RST}"
+            ok=1
+        fi
+
+        rm -f "$clt_placeholder"
+    fi
+
+    # Homebrew explicitly refuses to run its installer as root, so this has
+    # to run as TARGET_USER, not root. NONINTERACTIVE=1 skips Homebrew's own
+    # confirmation prompt (it still needs the Command Line Tools above and a
+    # working internet connection).
+    if su - "$TARGET_USER" -c 'command -v brew' >/dev/null 2>&1; then
+        echo "Homebrew already installed for $TARGET_USER."
+    else
+        echo "Installing Homebrew for $TARGET_USER (non-interactive)..."
+        su - "$TARGET_USER" -c 'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' || ok=1
+
+        # Put brew on PATH for future login shells (Apple Silicon prefix).
+        local brew_shellenv='''eval "$(/opt/homebrew/bin/brew shellenv)"'''
+        su - "$TARGET_USER" -c "grep -qxF '${brew_shellenv}' ~/.zprofile 2>/dev/null || echo '${brew_shellenv}' >> ~/.zprofile" || ok=1
+    fi
+
+    return "$ok"
+}
+
 # --- Main Step Execution ---
 
 if [[ -n "$NODE_HOSTNAME" ]]; then
@@ -288,6 +333,7 @@ run_step "Configure Software Update to Manual Mode" set_manual_updates
 run_step "Disable Spotlight Indexing" disable_spotlight
 run_step "Configure Unified Memory Allocation Limit to 90%" set_unified_memory_limit
 run_step "Increase Open File Limits (maxfiles)" set_maxfiles_limit
+run_step "Install Xcode CLT (git) and Homebrew" install_dev_tools
 
 # --- Execution Report & Post-Installation Instructions ---
 
