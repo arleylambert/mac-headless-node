@@ -224,7 +224,22 @@ sudo ./bootstrap_mac_node.sh <TARGET_USERNAME> [OPTIONAL_NODE_HOSTNAME]
 
 Useful if you plan to track updates, contribute changes, or just prefer having the whole repository (docs included) on the box.
 
-**Example (either option):**
+### Option C — Offline transfer (USB drive, AirDrop, etc.)
+
+For a Mac mini with no network access yet (or one you'd rather not connect to the internet before it's locked down), download the files on another computer and copy them over physically:
+
+1. On any computer with internet access, download the script — either right-click → **Save Link As** on [`bootstrap_mac_node.sh`](bootstrap_mac_node.sh), or use the **Code → Download ZIP** button on the [repository page](https://github.com/arleylambert/mac-headless-node) for everything (docs included).
+2. Copy the file(s) onto a USB flash drive, or transfer via AirDrop if the other computer is also a Mac.
+3. On the target Mac mini, copy the script from the drive to a working directory and continue from step 2 of Option A/B:
+   ```bash
+   # Example, assuming the drive is mounted as NODE_SETUP
+   cp "/Volumes/NODE_SETUP/bootstrap_mac_node.sh" ~/bootstrap_mac_node.sh
+   cd ~
+   chmod +x bootstrap_mac_node.sh
+   sudo ./bootstrap_mac_node.sh <TARGET_USERNAME> [OPTIONAL_NODE_HOSTNAME]
+   ```
+
+**Example (any option):**
 ```bash
 sudo ./bootstrap_mac_node.sh admin macmini-node01
 ```
