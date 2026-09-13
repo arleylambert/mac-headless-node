@@ -439,17 +439,29 @@ set_black_wallpaper() {
 
 hide_desktop_icons_and_widgets() {
     local ok=0
-    local current
-    current=$(su - "$TARGET_USER" -c 'defaults read com.apple.finder CreateDesktop' 2>/dev/null || echo "")
-    if [[ "$current" == "0" ]]; then
-        echo "Desktop icons/widgets already hidden (CreateDesktop=false). Skipping."
-        return 0
+
+    local current_icons current_widgets
+    current_icons=$(su - "$TARGET_USER" -c 'defaults read com.apple.finder CreateDesktop' 2>/dev/null || echo "")
+    current_widgets=$(su - "$TARGET_USER" -c 'defaults read com.apple.WindowManager StandardHideWidgets' 2>/dev/null || echo "")
+
+    if [[ "$current_icons" == "0" && "$current_widgets" == "1" ]]; then
+        echo "Desktop icons and widgets already hidden (CreateDesktop=false, StandardHideWidgets=true). Skipping."
+        return "$ok"
     fi
 
+    # CreateDesktop hides regular Finder desktop icons -- long-established,
+    # confirmed on real hardware. It does NOT touch the 3 default macOS
+    # desktop widgets (Weather, Calendar, Photos); that's a separate toggle,
+    # StandardHideWidgets, which is what System Settings -> Desktop & Dock ->
+    # Widgets -> Show Widgets -> "On Desktop" actually flips under the hood.
     su - "$TARGET_USER" -c 'defaults write com.apple.finder CreateDesktop -bool false' || ok=1
-    su - "$TARGET_USER" -c 'killall Finder 2>/dev/null || true'
+    su - "$TARGET_USER" -c 'defaults write com.apple.WindowManager StandardHideWidgets -bool true' || ok=1
 
-    echo -e "${CLR_YEL}Note: this hides the entire desktop icon/widget layer via Finder's CreateDesktop preference -- a long-established toggle for desktop icons, which should also catch the 3 default macOS desktop widgets (Weather, Calendar, Photos), since Sonoma+ places widgets in the same on-desktop arrangement as icons. Not confirmed on real hardware yet, though; if any widget is still visible after a reboot, right-click it and choose 'Remove Widget' as a manual fallback.${CLR_RST}"
+    su - "$TARGET_USER" -c 'killall Finder 2>/dev/null || true'
+    su - "$TARGET_USER" -c 'killall Dock 2>/dev/null || true'
+
+    echo "Desktop icons hidden and widgets disabled (CreateDesktop=false, StandardHideWidgets=true)."
+    echo -e "${CLR_YEL}Note: this stops the 3 default widgets (Weather, Calendar, Photos) from displaying, but macOS may not reclaim the space they occupied. Not personally confirmed on this hardware yet -- if a widget is still visible after a reboot, right-click it and choose 'Remove Widget' as a manual fallback.${CLR_RST}"
     return "$ok"
 }
 

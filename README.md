@@ -106,9 +106,10 @@ Stops GUI confirmation prompts from blocking headless background services that b
 | `launchanim`, window/animation settings | `false` / `0` |
 | `com.apple.CrashReporter DialogType` | `none` |
 | Desktop picture | solid black (`/Library/Desktop Pictures/headless-black.png`) |
-| `com.apple.finder CreateDesktop` | `false` (hides desktop icons and, best-effort, the 3 default widgets: Weather, Calendar, Photos) |
+| `com.apple.finder CreateDesktop` | `false` (hides regular Finder desktop icons) |
+| `com.apple.WindowManager StandardHideWidgets` | `true` (hides the 3 default desktop widgets: Weather, Calendar, Photos) |
 
-Purges pinned Dock icons (leaving just Terminal for one-click shell access over Screen Sharing), turns off animations, suppresses crash dialogs, sets a plain black wallpaper, and hides the desktop icon/widget layer entirely — mostly cosmetic, but it reduces rendering overhead over Screen Sharing. Two caveats: setting the wallpaper goes through System Events and can require a one-time "Automation" permission grant for Terminal (same category of manual TCC gate as Full Disk Access for SSH — see [Prerequisites](#prerequisites)); and hiding the desktop widgets specifically hasn't been confirmed on real hardware — if one survives a reboot, right-click it and choose "Remove Widget" as a manual fallback.
+Purges pinned Dock icons (leaving just Terminal for one-click shell access over Screen Sharing), turns off animations, suppresses crash dialogs, sets a plain black wallpaper, and hides both desktop icons and the default desktop widgets — mostly cosmetic, but it reduces rendering overhead over Screen Sharing. Note `CreateDesktop` and `StandardHideWidgets` are two separate, unrelated preferences: an earlier version of this script assumed `CreateDesktop` alone would also hide the widgets, which real Mac mini M4 hardware disproved -- `StandardHideWidgets` is the actual key behind System Settings → Desktop & Dock → Widgets → "On Desktop". One caveat remains: setting the wallpaper goes through System Events and can require a one-time "Automation" permission grant for Terminal (same category of manual TCC gate as Full Disk Access for SSH — see [Prerequisites](#prerequisites)).
 </details>
 
 <details>
