@@ -185,7 +185,8 @@ This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It d
 
 1. **Clean macOS installation** — validated on macOS Sonoma and Sequoia, Apple Silicon only.
 2. **Root privileges** — the script must run via `sudo`.
-3. **FileVault disabled** before deployment:
+3. **No `git` required** — see [Installation & Usage](#installation--usage) for a `curl`-only path if you're working with a genuinely fresh install.
+4. **FileVault disabled** before deployment:
    ```bash
    # Check status
    fdesetup status
@@ -198,26 +199,50 @@ This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It d
 
 ## Installation & Usage
 
-1. Clone the repository onto the target Mac:
-   ```bash
-   git clone https://github.com/arleylambert/mac-headless-node.git
-   cd mac-headless-node
-   ```
+A clean macOS install does **not** ship with `git` — the first time you run it, macOS prompts you to install the Xcode Command Line Tools, which is an interactive GUI dialog and needs an internet connection of its own. That's fine if you're setting the machine up in person, but it gets in the way of a fast, scriptable bootstrap. Pick the path that fits:
 
-2. Make the script executable:
+### Option A — No `git` required (recommended for a fresh machine)
+
+`curl` is preinstalled on every Mac, so you can pull just the script directly:
+
+```bash
+curl -O https://raw.githubusercontent.com/arleylambert/mac-headless-node/main/bootstrap_mac_node.sh
+chmod +x bootstrap_mac_node.sh
+sudo ./bootstrap_mac_node.sh <TARGET_USERNAME> [OPTIONAL_NODE_HOSTNAME]
+```
+
+This gets you only the script — enough to run it. Grab the [README](README.md) and [SECURITY.md](SECURITY.md) separately (or read them here on GitHub) if you want the full documentation on the machine too.
+
+### Option B — Full clone (if `git` is already installed, or you don't mind installing it)
+
+```bash
+git clone https://github.com/arleylambert/mac-headless-node.git
+cd mac-headless-node
+chmod +x bootstrap_mac_node.sh
+sudo ./bootstrap_mac_node.sh <TARGET_USERNAME> [OPTIONAL_NODE_HOSTNAME]
+```
+
+Useful if you plan to track updates, contribute changes, or just prefer having the whole repository (docs included) on the box.
+
+### Option C — Offline transfer (USB drive, AirDrop, etc.)
+
+For a Mac mini with no network access yet (or one you'd rather not connect to the internet before it's locked down), download the files on another computer and copy them over physically:
+
+1. On any computer with internet access, download the script — either right-click → **Save Link As** on [`bootstrap_mac_node.sh`](bootstrap_mac_node.sh), or use the **Code → Download ZIP** button on the [repository page](https://github.com/arleylambert/mac-headless-node) for everything (docs included).
+2. Copy the file(s) onto a USB flash drive, or transfer via AirDrop if the other computer is also a Mac.
+3. On the target Mac mini, copy the script from the drive to a working directory and continue from step 2 of Option A/B:
    ```bash
+   # Example, assuming the drive is mounted as NODE_SETUP
+   cp "/Volumes/NODE_SETUP/bootstrap_mac_node.sh" ~/bootstrap_mac_node.sh
+   cd ~
    chmod +x bootstrap_mac_node.sh
-   ```
-
-3. Run it:
-   ```bash
    sudo ./bootstrap_mac_node.sh <TARGET_USERNAME> [OPTIONAL_NODE_HOSTNAME]
    ```
 
-   **Example:**
-   ```bash
-   sudo ./bootstrap_mac_node.sh admin macmini-node01
-   ```
+**Example (any option):**
+```bash
+sudo ./bootstrap_mac_node.sh admin macmini-node01
+```
 
 ---
 
