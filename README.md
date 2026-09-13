@@ -83,7 +83,7 @@ Unlocks elevated fan curves and sustained thermal headroom on chips that support
 | `com.apple.screensharing` (launchd) | enabled |
 | `ClientAliveInterval` / `ClientAliveCountMax` (`sshd_config`) | `30` / `5` |
 
-Turns on SSH and native VNC (Screen Sharing, port 5900) and tunes SSH keep-alives so headless sessions don't get silently dropped.
+Turns on SSH and native VNC (Screen Sharing, port 5900) and tunes SSH keep-alives so headless sessions don't get silently dropped. The edited `sshd_config` is validated with `sshd -t` before being kept -- on a machine with no other remote access, a broken config would mean losing SSH for good, so if validation fails the original file is restored from backup automatically and the step is reported as failed rather than left in a broken state.
 </details>
 
 <details>
@@ -193,10 +193,11 @@ This script was built and **actively validated on a Mac mini M4 / M4 Pro**. It d
 1. **Clean macOS installation** — validated on macOS Sonoma, Sequoia, and Tahoe (26), Apple Silicon only.
 2. **Root privileges** — the script must run via `sudo`.
 3. **No `git` required** — see [Installation & Usage](#installation--usage) for a `curl`-only path if you're working with a genuinely fresh install.
-4. **Full Disk Access for Terminal** (or whichever app runs the script) — required by macOS before `systemsetup` is allowed to turn Remote Login (SSH) on or off. This is a one-time, GUI-only step Apple doesn't allow scripting around:
+4. **Target username required only on the first successful run** — it (and the optional hostname) are then remembered for you; see [Re-running the script](#re-running-the-script).
+5. **Full Disk Access for Terminal** (or whichever app runs the script) — required by macOS before `systemsetup` is allowed to turn Remote Login (SSH) on or off. This is a one-time, GUI-only step Apple doesn't allow scripting around:
    `System Settings → Privacy & Security → Full Disk Access → enable it for Terminal`.
-   Without this, the script still completes everything else — it just reports the SSH/Screen Sharing step as failed (with a hint pointing back here) and you re-run it after granting access.
-5. **FileVault disabled** before deployment:
+   Without this, the script still completes everything else — it just reports the SSH/Screen Sharing step as failed (with a hint pointing back here) and you re-run it after granting access. The script *tries* to catch this during preflight too, but that check is best-effort and may not fire on every macOS version — don't take a passed preflight as proof FDA is granted; the failing step later is the reliable signal.
+6. **FileVault disabled** before deployment:
    ```bash
    # Check status
    fdesetup status
@@ -253,6 +254,25 @@ For a Mac mini with no network access yet (or one you'd rather not connect to th
 ```bash
 sudo ./bootstrap_mac_node.sh admin macmini-node01
 ```
+
+### Re-running the script
+
+`<TARGET_USERNAME>` and `[OPTIONAL_NODE_HOSTNAME]` are only required the **first** time the script runs successfully. Once it does, both values are saved to `/etc/mac-headless-node.env` (root-only, `chmod 600`), and every subsequent run can omit them entirely:
+
+```bash
+sudo ./bootstrap_mac_node.sh
+```
+
+The script logs which values it's using and where they came from before doing anything else, e.g.:
+
+```
+Using saved target user 'admin' from a previous run (/etc/mac-headless-node.env). Pass a username explicitly to use a different one.
+Using saved hostname 'macmini-node01' from a previous run (/etc/mac-headless-node.env). Pass a hostname explicitly to use a different one.
+```
+
+This is what makes it safe to just re-run the whole script after fixing a failed step (e.g. granting Full Disk Access, see [Prerequisites](#prerequisites)) — every step is idempotent and skips work it already did, and you don't need to remember or retype the original arguments.
+
+To use different values, just pass them explicitly again — an explicit argument always overrides the saved one and becomes the new saved value. To fully reset, delete the state file: `sudo rm /etc/mac-headless-node.env`.
 
 ---
 
